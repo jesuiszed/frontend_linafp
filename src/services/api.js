@@ -1,10 +1,49 @@
 import axios from 'axios'
 
 const TOKEN_KEY = 'gfs_admin_token'
+const REFRESH_TOKEN_KEY = 'gfs_admin_refresh_token'
+export const AUTH_STORAGE_EVENT = 'gfs-auth-changed'
 const API_BASE_URL = 'https://linafp-api.vercel.app/api/v1'
 const FALLBACK_SEASON_ID = Number(import.meta.env.VITE_SEASON_ID || 1)
 
 let cachedSeasonId = null
+let refreshRequest = null
+
+const isBrowser = () => typeof window !== 'undefined'
+
+const notifyAuthChanged = () => {
+  if (!isBrowser()) return
+  window.dispatchEvent(new Event(AUTH_STORAGE_EVENT))
+}
+
+export const getStoredAccessToken = () => {
+  if (!isBrowser()) return null
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export const getStoredRefreshToken = () => {
+  if (!isBrowser()) return null
+  return localStorage.getItem(REFRESH_TOKEN_KEY)
+}
+
+export const setAuthTokens = (accessToken, refreshToken) => {
+  if (!isBrowser()) return
+
+  if (accessToken) localStorage.setItem(TOKEN_KEY, accessToken)
+  else localStorage.removeItem(TOKEN_KEY)
+
+  if (refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+  else localStorage.removeItem(REFRESH_TOKEN_KEY)
+
+  notifyAuthChanged()
+}
+
+export const clearAuthTokens = () => {
+  if (!isBrowser()) return
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(REFRESH_TOKEN_KEY)
+  notifyAuthChanged()
+}
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -14,12 +53,88 @@ const api = axios.create({
 
 // Attach token to every request when present
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem(TOKEN_KEY)
+  const token = getStoredAccessToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
   return config
 })
+
+const shouldSkipRefresh = (url = '') => (
+  url.includes('/auth/login') ||
+  url.includes('/auth/refresh') ||
+  url.includes('/auth/bootstrap-admin')
+)
+
+const requestTokenRefresh = async () => {
+  const refreshToken = getStoredRefreshToken()
+  if (!refreshToken) {
+    throw new Error('Missing refresh token')
+  }
+
+  const response = await api.post('/auth/refresh', {
+    refresh_token: refreshToken,
+  })
+
+  const nextAccess = response.data?.access_token
+  const nextRefresh = response.data?.refresh_token
+
+  if (!nextAccess || !nextRefresh) {
+    throw new Error('Invalid refresh response')
+  }
+
+  setAuthTokens(nextAccess, nextRefresh)
+  return nextAccess
+}
+
+const refreshAccessToken = async () => {
+  if (!refreshRequest) {
+    refreshRequest = requestTokenRefresh().finally(() => {
+      refreshRequest = null
+    })
+  }
+
+  return refreshRequest
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const status = error?.response?.status
+    const original = error?.config
+
+    if (status !== 401 || !original) {
+      return Promise.reject(error)
+    }
+
+    const requestUrl = String(original.url || '')
+    if (shouldSkipRefresh(requestUrl)) {
+      clearAuthTokens()
+      return Promise.reject(error)
+    }
+
+    if (original.__isRetryRequest) {
+      clearAuthTokens()
+      return Promise.reject(error)
+    }
+
+    if (!getStoredRefreshToken()) {
+      clearAuthTokens()
+      return Promise.reject(error)
+    }
+
+    try {
+      original.__isRetryRequest = true
+      const freshAccessToken = await refreshAccessToken()
+      original.headers = original.headers || {}
+      original.headers.Authorization = `Bearer ${freshAccessToken}`
+      return api(original)
+    } catch (refreshError) {
+      clearAuthTokens()
+      return Promise.reject(refreshError)
+    }
+  },
+)
 
 const mapClub = (club) => ({
   id: club.id,
