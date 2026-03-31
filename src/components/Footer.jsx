@@ -22,9 +22,6 @@ export default function Footer() {
             Suivez toute l'actualité, les résultats, le classement et les statistiques du
             championnat national.
           </p>
-          <p style={{ marginTop: '0.75rem', fontSize: '0.78rem', color: 'rgba(255,255,255,0.35)' }}>
-            Identifiants admin : <strong style={{ color: 'rgba(255,255,255,0.5)' }}>admin</strong> / <strong style={{ color: 'rgba(255,255,255,0.5)' }}>admin1234</strong>
-          </p>
         </div>
 
         {/* Navigation */}
