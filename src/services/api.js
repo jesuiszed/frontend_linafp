@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const TOKEN_KEY = 'gfs_admin_token'
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://linafp.pythonanywhere.com/api/v1'
 const FALLBACK_SEASON_ID = Number(import.meta.env.VITE_SEASON_ID || 1)
 
 let cachedSeasonId = null
