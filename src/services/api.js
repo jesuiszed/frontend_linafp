@@ -269,6 +269,60 @@ export const updateMatch = async (id, data) => {
 
 export const deleteMatch = (id) => api.delete(`/matches/${id}`)
 
+// ── Match Events ─────────────────────────────────────────────────────────
+export const getMatchEvents = async (matchId) => {
+  const response = await api.get(`/matches/${matchId}/events`)
+  return { data: getResponseItems(response) }
+}
+
+export const createMatchEvent = (matchId, data) => api.post(`/matches/${matchId}/events`, data)
+export const updateMatchEvent = (matchId, eventId, data) => api.patch(`/matches/${matchId}/events/${eventId}`, data)
+export const deleteMatchEvent = (matchId, eventId) => api.delete(`/matches/${matchId}/events/${eventId}`)
+
+// ── Competitions ─────────────────────────────────────────────────────────
+export const getCompetitions = async (params = {}) => {
+  const response = await api.get('/competitions', { params })
+  return { data: getResponseItems(response), meta: response.data?.meta || null }
+}
+
+export const getCompetition = (id) => api.get(`/competitions/${id}`)
+export const createCompetition = (data) => api.post('/competitions', data)
+export const updateCompetition = (id, data) => api.patch(`/competitions/${id}`, data)
+export const deleteCompetition = (id) => api.delete(`/competitions/${id}`)
+
+// ── Seasons ──────────────────────────────────────────────────────────────
+export const getSeasons = async (params = {}) => {
+  const response = await api.get('/seasons', { params })
+  return { data: getResponseItems(response), meta: response.data?.meta || null }
+}
+
+export const getSeason = (id) => api.get(`/seasons/${id}`)
+export const createSeason = (data) => api.post('/seasons', data)
+export const updateSeason = (id, data) => api.patch(`/seasons/${id}`, data)
+export const deleteSeason = (id) => api.delete(`/seasons/${id}`)
+
+// ── Users (Admin) ────────────────────────────────────────────────────────
+export const getUsers = async (params = {}) => {
+  const response = await api.get('/users', { params })
+  return { data: getResponseItems(response), meta: response.data?.meta || null }
+}
+
+export const getUser = (id) => api.get(`/users/${id}`)
+export const createUser = (data) => api.post('/users', data)
+export const updateUser = (id, data) => api.patch(`/users/${id}`, data)
+export const deleteUser = (id) => api.delete(`/users/${id}`)
+
+// ── Squad Memberships (Admin) ───────────────────────────────────────────
+export const getSquadMemberships = async (params = {}) => {
+  const response = await api.get('/squad-memberships', { params })
+  return { data: getResponseItems(response), meta: response.data?.meta || null }
+}
+
+export const getSquadMembership = (id) => api.get(`/squad-memberships/${id}`)
+export const createSquadMembership = (data) => api.post('/squad-memberships', data)
+export const updateSquadMembership = (id, data) => api.patch(`/squad-memberships/${id}`, data)
+export const deleteSquadMembership = (id) => api.delete(`/squad-memberships/${id}`)
+
 // ── Standings ──────────────────────────────────────────────────────────────
 export const getStandings = async () => {
   const seasonId = await getCurrentSeasonId()
