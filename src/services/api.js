@@ -202,7 +202,7 @@ const getResponseItems = (response) => {
   return []
 }
 
-const getCurrentSeasonId = async () => {
+export const getCurrentSeasonId = async () => {
   if (cachedSeasonId) return cachedSeasonId
 
   try {
@@ -320,6 +320,11 @@ export const deletePlayer = (id) => api.delete(`/players/${id}`)
 export const getMatches = async () => {
   const response = await api.get('/matches')
   return { data: getResponseItems(response).map(mapMatch) }
+}
+
+export const getMatchesByParams = async (params = {}) => {
+  const response = await api.get('/matches', { params })
+  return { data: getResponseItems(response).map(mapMatch), meta: response.data?.meta || null }
 }
 
 export const getMatch = async (id) => {
@@ -444,6 +449,60 @@ export const getStandings = async () => {
   const response = await api.get('/standings', { params: { season_id: seasonId } })
   const rows = response.data?.data?.rows || []
   return { data: rows.map(mapStandingRow) }
+}
+
+export const getStandingsBySeason = async (seasonId) => {
+  const resolvedSeasonId = seasonId || await getCurrentSeasonId()
+  const response = await api.get('/standings', { params: { season_id: resolvedSeasonId } })
+  const rows = response.data?.data?.rows || []
+  return {
+    data: rows.map(mapStandingRow),
+    season_id: response.data?.data?.season_id || resolvedSeasonId,
+  }
+}
+
+export const getTopScorers = async ({ season_id, limit = 10 } = {}) => {
+  const resolvedSeasonId = season_id || await getCurrentSeasonId()
+  const response = await api.get('/stats/top-scorers', {
+    params: {
+      season_id: resolvedSeasonId,
+      limit,
+    },
+  })
+
+  return {
+    data: response.data?.data || [],
+    season_id: resolvedSeasonId,
+  }
+}
+
+export const getTopAssists = async ({ season_id, limit = 10 } = {}) => {
+  const resolvedSeasonId = season_id || await getCurrentSeasonId()
+  const response = await api.get('/stats/top-assists', {
+    params: {
+      season_id: resolvedSeasonId,
+      limit,
+    },
+  })
+
+  return {
+    data: response.data?.data || [],
+    season_id: resolvedSeasonId,
+  }
+}
+
+export const getCardsStats = async ({ season_id } = {}) => {
+  const resolvedSeasonId = season_id || await getCurrentSeasonId()
+  const response = await api.get('/stats/cards', {
+    params: {
+      season_id: resolvedSeasonId,
+    },
+  })
+
+  return {
+    data: response.data?.data || { by_club: [], by_player: [] },
+    season_id: resolvedSeasonId,
+  }
 }
 
 // ── Stats ──────────────────────────────────────────────────────────────────
