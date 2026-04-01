@@ -152,6 +152,98 @@ const splitName = (fullName = '') => {
   return { first_name: parts[0], last_name: parts.slice(1).join(' ') }
 }
 
+const ageFromBirthDate = (birthDate) => {
+  if (!birthDate) return null
+
+  const parsed = new Date(birthDate)
+  if (Number.isNaN(parsed.getTime())) return null
+
+  const today = new Date()
+  let age = today.getFullYear() - parsed.getFullYear()
+  const monthDiff = today.getMonth() - parsed.getMonth()
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < parsed.getDate())) {
+    age -= 1
+  }
+
+  return age >= 0 ? age : null
+}
+
+const birthDateFromAge = (ageInput) => {
+  if (ageInput === '' || ageInput === null || ageInput === undefined) return null
+
+  const age = Number(ageInput)
+  if (!Number.isFinite(age) || age <= 0) return null
+
+  const years = Math.floor(age)
+  const today = new Date()
+  const birthDate = new Date(Date.UTC(
+    today.getUTCFullYear() - years,
+    today.getUTCMonth(),
+    today.getUTCDate(),
+  ))
+
+  return birthDate.toISOString().slice(0, 10)
+}
+
+const normalizePlayerPayload = (data) => {
+  const names = splitName(data.nom)
+
+  return {
+    first_name: names.first_name,
+    last_name: names.last_name,
+    birth_date: birthDateFromAge(data.age),
+    nationality: data.nationalite || null,
+    position: data.poste || null,
+  }
+}
+
+const mergePlayerWithMembership = (player, membership) => {
+  const mapped = mapPlayer(player)
+
+  if (!membership) return mapped
+
+  return {
+    ...mapped,
+    team_id: membership.club_id ?? membership.club?.id ?? mapped.team_id,
+    numero: membership.shirt_number ?? mapped.numero,
+  }
+}
+
+const listAllPages = async (path, params = {}, pageSize = 100) => {
+  const firstResponse = await api.get(path, {
+    params: {
+      ...params,
+      page: 1,
+      page_size: pageSize,
+    },
+  })
+
+  let items = getResponseItems(firstResponse)
+  const total = Number(firstResponse.data?.meta?.total ?? items.length)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
+  if (totalPages > 1) {
+    const restResponses = await Promise.all(
+      Array.from({ length: totalPages - 1 }, (_, index) =>
+        api.get(path, {
+          params: {
+            ...params,
+            page: index + 2,
+            page_size: pageSize,
+          },
+        }),
+      ),
+    )
+
+    for (const response of restResponses) {
+      items = items.concat(getResponseItems(response))
+    }
+  }
+
+  return items
+}
+
 const mapPlayer = (player) => {
   const nom = `${player.first_name || ''} ${player.last_name || ''}`.trim()
   return {
@@ -159,7 +251,7 @@ const mapPlayer = (player) => {
     nom,
     nationalite: player.nationality,
     poste: player.position,
-    age: null,
+    age: ageFromBirthDate(player.birth_date),
     numero: null,
     goals: 0,
     team_id: null,
@@ -279,10 +371,68 @@ export const deleteTeam = (id) => api.delete(`/clubs/${id}`)
 
 // ── Players ────────────────────────────────────────────────────────────────
 export const getPlayers = async (params = {}) => {
-  const query = {}
-  if (params.q) query.q = params.q
-  const response = await api.get('/players', { params: query })
-  return { data: getResponseItems(response).map(mapPlayer) }
+  const page = Math.max(1, Number(params.page || 1))
+  const pageSize = Math.min(100, Math.max(1, Number(params.page_size || 20)))
+  const search = params.q ? String(params.q).trim() : ''
+  const teamId = params.team_id ? Number(params.team_id) : null
+  const seasonId = await getCurrentSeasonId()
+
+  const memberships = await listAllPages('/squad-memberships', {
+    season_id: seasonId,
+    ...(teamId ? { club_id: teamId } : {}),
+  })
+
+  const membershipByPlayerId = new Map()
+  for (const membership of memberships) {
+    const playerId = Number(membership.player_id)
+    if (!Number.isInteger(playerId) || playerId <= 0) continue
+
+    const previous = membershipByPlayerId.get(playerId)
+    if (!previous || Number(membership.id) > Number(previous.id || 0)) {
+      membershipByPlayerId.set(playerId, membership)
+    }
+  }
+
+  if (teamId) {
+    const allPlayers = await listAllPages('/players', search ? { q: search } : {})
+    const playerIds = new Set(Array.from(membershipByPlayerId.keys()))
+    const filtered = allPlayers.filter((player) => playerIds.has(Number(player.id)))
+
+    const total = filtered.length
+    const start = (page - 1) * pageSize
+    const rows = filtered.slice(start, start + pageSize)
+
+    return {
+      data: rows.map((player) => mergePlayerWithMembership(player, membershipByPlayerId.get(Number(player.id)))),
+      meta: {
+        page,
+        page_size: pageSize,
+        total,
+        q: search || null,
+      },
+    }
+  }
+
+  const response = await api.get('/players', {
+    params: {
+      page,
+      page_size: pageSize,
+      ...(search ? { q: search } : {}),
+    },
+  })
+
+  const rows = getResponseItems(response)
+  const data = rows.map((player) => mergePlayerWithMembership(player, membershipByPlayerId.get(Number(player.id))))
+
+  return {
+    data,
+    meta: {
+      page: Number(response.data?.meta?.page ?? page),
+      page_size: Number(response.data?.meta?.page_size ?? pageSize),
+      total: Number(response.data?.meta?.total ?? data.length),
+      q: response.data?.meta?.q ?? (search || null),
+    },
+  }
 }
 
 export const getPlayer = async (id) => {
@@ -291,30 +441,79 @@ export const getPlayer = async (id) => {
 }
 
 export const createPlayer = async (data) => {
-  const names = splitName(data.nom)
-  const payload = {
-    first_name: names.first_name,
-    last_name: names.last_name,
-    nationality: data.nationalite || null,
-    position: data.poste || null,
-  }
+  const payload = normalizePlayerPayload(data)
   const response = await api.post('/players', payload)
-  return { data: mapPlayer(response.data) }
+
+  const seasonId = await getCurrentSeasonId()
+  const teamId = Number(data.team_id)
+  const shirtNumber = data.numero !== '' && data.numero !== null && data.numero !== undefined
+    ? Number(data.numero)
+    : null
+
+  let membership = null
+  if (Number.isInteger(teamId) && teamId > 0) {
+    const membershipResponse = await api.post('/squad-memberships', {
+      player_id: Number(response.data.id),
+      club_id: teamId,
+      season_id: seasonId,
+      shirt_number: shirtNumber,
+    })
+    membership = membershipResponse.data
+  }
+
+  return { data: mergePlayerWithMembership(response.data, membership) }
 }
 
 export const updatePlayer = async (id, data) => {
-  const names = splitName(data.nom)
-  const payload = {
-    first_name: names.first_name,
-    last_name: names.last_name,
-    nationality: data.nationalite || null,
-    position: data.poste || null,
-  }
+  const payload = normalizePlayerPayload(data)
   const response = await api.patch(`/players/${id}`, payload)
-  return { data: mapPlayer(response.data) }
+
+  const seasonId = await getCurrentSeasonId()
+  const teamId = Number(data.team_id)
+  const shirtNumber = data.numero !== '' && data.numero !== null && data.numero !== undefined
+    ? Number(data.numero)
+    : null
+
+  let membership = null
+  if (Number.isInteger(teamId) && teamId > 0) {
+    const membershipRows = await listAllPages('/squad-memberships', {
+      season_id: seasonId,
+      player_id: Number(id),
+    })
+
+    const existingMembership = membershipRows[0]
+    const membershipPayload = {
+      player_id: Number(id),
+      club_id: teamId,
+      season_id: seasonId,
+      shirt_number: shirtNumber,
+    }
+
+    if (existingMembership?.id) {
+      const updatedMembership = await api.patch(`/squad-memberships/${existingMembership.id}`, membershipPayload)
+      membership = updatedMembership.data
+    } else {
+      const createdMembership = await api.post('/squad-memberships', membershipPayload)
+      membership = createdMembership.data
+    }
+  }
+
+  return { data: mergePlayerWithMembership(response.data, membership) }
 }
 
-export const deletePlayer = (id) => api.delete(`/players/${id}`)
+export const deletePlayer = async (id) => {
+  try {
+    return await api.delete(`/players/${id}`)
+  } catch (error) {
+    const detail = error?.response?.data?.detail
+    if (detail === 'Related resource not found') {
+      const wrapped = new Error('Suppression impossible: ce joueur est lié à des événements de match.')
+      wrapped.cause = error
+      throw wrapped
+    }
+    throw error
+  }
+}
 
 // ── Matches ────────────────────────────────────────────────────────────────
 export const getMatches = async () => {

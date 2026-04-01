@@ -7,6 +7,8 @@ const EMPTY_FORM = {
   nom: '', age: '', nationalite: '', poste: '', numero: '', goals: '', team_id: '',
 }
 
+const PLAYERS_PAGE_SIZE = 20
+
 export default function Players() {
   const [players, setPlayers]     = useState([])
   const [teams, setTeams]         = useState([])
@@ -18,6 +20,8 @@ export default function Players() {
   const [editingId, setEditingId] = useState(null)
   const [saving, setSaving]       = useState(false)
   const [formError, setFormError] = useState(null)
+  const [page, setPage]           = useState(1)
+  const [meta, setMeta]           = useState({ page: 1, page_size: PLAYERS_PAGE_SIZE, total: 0 })
 
   useEffect(() => {
     getTeams().then((res) => setTeams(res.data)).catch(() => {})
@@ -26,14 +30,27 @@ export default function Players() {
   const fetchPlayers = useCallback(() => {
     setLoading(true)
     setError(null)
-    const params = filterTeam ? { team_id: filterTeam } : {}
+    const params = {
+      page,
+      page_size: PLAYERS_PAGE_SIZE,
+    }
+    if (filterTeam) params.team_id = filterTeam
+
     getPlayers(params)
-      .then((res) => setPlayers(res.data))
+      .then((res) => {
+        setPlayers(res.data)
+        setMeta({
+          page: Number(res.meta?.page ?? page),
+          page_size: Number(res.meta?.page_size ?? PLAYERS_PAGE_SIZE),
+          total: Number(res.meta?.total ?? res.data.length),
+        })
+      })
       .catch(() => setError('Impossible de charger les joueurs.'))
       .finally(() => setLoading(false))
-  }, [filterTeam])
+  }, [filterTeam, page])
 
   useEffect(() => { fetchPlayers() }, [fetchPlayers])
+  useEffect(() => { setPage(1) }, [filterTeam])
 
   const teamName = (id) => teams.find((t) => t.id === id || t.id === Number(id))?.nom || '–'
 
@@ -99,9 +116,13 @@ export default function Players() {
     if (!window.confirm(`Supprimer le joueur « ${player.nom} » ?`)) return
     try {
       await deletePlayer(player.id)
-      fetchPlayers()
-    } catch {
-      alert('Impossible de supprimer ce joueur.')
+      if (players.length === 1 && page > 1) {
+        setPage((prev) => prev - 1)
+      } else {
+        fetchPlayers()
+      }
+    } catch (err) {
+      alert(err?.response?.data?.detail || err?.message || 'Impossible de supprimer ce joueur.')
     }
   }
 
@@ -109,6 +130,12 @@ export default function Players() {
     const map = { Gardien: 'badge-blue', Défenseur: 'badge-green', Milieu: 'badge-yellow', Attaquant: 'badge-green' }
     return map[poste] || 'badge-blue'
   }
+
+  const totalPlayers = Number(meta.total || 0)
+  const pageSize = Number(meta.page_size || PLAYERS_PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(totalPlayers / pageSize))
+  const rangeStart = totalPlayers === 0 ? 0 : (page - 1) * pageSize + 1
+  const rangeEnd = Math.min(page * pageSize, totalPlayers)
 
   return (
     <div className="page-container">
@@ -146,8 +173,9 @@ export default function Players() {
           </p>
         </div>
       ) : (
-        <div className="table-wrapper">
-          <table>
+        <>
+          <div className="table-wrapper">
+            <table>
             <thead>
               <tr>
                 <th>#</th>
@@ -191,8 +219,44 @@ export default function Players() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
+            </table>
+          </div>
+
+          <div style={{
+            marginTop: '1rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '0.75rem',
+            flexWrap: 'wrap',
+          }}>
+            <p style={{ margin: 0, color: '#6b7280', fontSize: '0.875rem' }}>
+              Affichage {rangeStart}-{rangeEnd} sur {totalPlayers} joueurs
+            </p>
+
+            <div className="action-buttons" style={{ justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              >
+                Précédent
+              </button>
+              <span style={{ alignSelf: 'center', color: '#374151', fontWeight: '600', fontSize: '0.875rem' }}>
+                Page {page} / {totalPages}
+              </span>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={page >= totalPages || loading}
+                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              >
+                Suivant
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Modal */}
